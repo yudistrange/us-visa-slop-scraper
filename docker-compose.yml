@@ -1,0 +1,17 @@
+services:
+  scheduler:
+    build: .
+    container_name: visa-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - HEADLESS=true
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
