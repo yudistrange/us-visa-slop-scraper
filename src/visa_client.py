@@ -6,6 +6,7 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
@@ -14,6 +15,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from .config import Settings
 
 logger = logging.getLogger("visa_scheduler.client")
+
+SCREENSHOTS_DIR = Path("logs/screenshots")
 
 # Realistic user agents
 USER_AGENTS = [
@@ -49,6 +52,8 @@ class VisaClient:
 
     async def start(self) -> None:
         """Launch browser and create a context."""
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=self.settings.headless,
@@ -93,6 +98,13 @@ class VisaClient:
         delay = random.uniform(min_sec, max_sec)
         await asyncio.sleep(delay)
 
+    async def _save_screenshot(self, name: str) -> None:
+        """Save a screenshot for debugging."""
+        if self._page:
+            path = SCREENSHOTS_DIR / f"{name}.png"
+            await self._page.screenshot(path=str(path))
+            logger.info("Screenshot saved: %s", path)
+
     async def sign_in(self) -> None:
         """Sign into ais.usvisa-info.com."""
         page = self._page
@@ -124,7 +136,7 @@ class VisaClient:
         await self._random_delay(0.5, 1.5)
 
         # Check the privacy/terms checkbox below the password field
-        # The actual <input> may be hidden; click the visible <label> instead
+        # The actual <input> may be hidden; click the visible <label> or wrapper instead
         checkbox_clicked = False
         for selector in [
             'label[for="policy_confirmed"]',
@@ -147,6 +159,7 @@ class VisaClient:
             await self._save_screenshot("checkbox_not_found")
 
         # Submit
+        logger.info("Submitting login form...")
         submit_btn = page.locator('input[type="submit"][name="commit"]')
         await submit_btn.click()
 
@@ -156,14 +169,19 @@ class VisaClient:
 
         # Check if login succeeded
         if "sign_in" in page.url:
+            await self._save_screenshot("login_failed")
+
             error = page.locator(".flash-container .alert, .error-message")
             if await error.count() > 0:
                 error_text = await error.first.inner_text()
                 raise RuntimeError(f"Login failed: {error_text.strip()}")
-            raise RuntimeError("Login failed: still on sign-in page")
+            raise RuntimeError(
+                "Login failed: still on sign-in page. "
+                "Screenshot saved to logs/screenshots/login_failed.png"
+            )
 
         self._signed_in = True
-        logger.info("Successfully signed in")
+        logger.info("✅ Successfully signed in (URL: %s)", page.url)
 
     async def _ensure_signed_in(self) -> None:
         """Ensure we have an active session, re-login if needed."""
