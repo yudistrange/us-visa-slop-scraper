@@ -3,13 +3,38 @@ services:
     build: .
     container_name: visa-scheduler
     restart: unless-stopped
-    env_file:
-      - .env
     volumes:
       - ./logs:/app/logs
-    environment:
-      - HEADLESS=true
-    # Resource limits
+
+    # ──────────────────────────────────────────────
+    # OPTION 1 (recommended): Load from .env file
+    #   cp .env.example .env && edit .env
+    # ──────────────────────────────────────────────
+    env_file:
+      - .env
+
+    # ──────────────────────────────────────────────
+    # OPTION 2: Set variables inline
+    #   Uncomment below and remove env_file above
+    # ──────────────────────────────────────────────
+    # environment:
+    #   # Required
+    #   - USVISA_EMAIL=your-email@example.com
+    #   - USVISA_PASSWORD=your-password
+    #   - SCHEDULE_ID=12345678
+    #   - CURRENT_APPOINTMENT_DATE=2026-09-15
+    #   - TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+    #   - TELEGRAM_CHAT_ID=123456789
+    #   # Optional (defaults shown)
+    #   - FACILITY_ID=95
+    #   - COUNTRY_CODE=en-ca
+    #   - CHECK_INTERVAL_MINUTES=10
+    #   - CHECK_INTERVAL_JITTER_MINUTES=5
+    #   - AUTO_RESCHEDULE=false
+    #   - LOG_LEVEL=INFO
+    #   - MAX_CONSECUTIVE_ERRORS=5
+    #   - HEADLESS=true
+
     deploy:
       resources:
         limits:
