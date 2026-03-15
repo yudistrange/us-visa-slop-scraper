@@ -123,14 +123,28 @@ class VisaClient:
         await password_input.type(self.settings.usvisa_password, delay=random.randint(50, 150))
         await self._random_delay(0.5, 1.5)
 
-        # Check the privacy checkbox
-        try:
-            checkbox = page.locator('input[name="policy_confirmed"]')
-            if await checkbox.count() > 0:
-                await checkbox.check()
+        # Check the privacy/terms checkbox below the password field
+        # The actual <input> may be hidden; click the visible <label> instead
+        checkbox_clicked = False
+        for selector in [
+            'label[for="policy_confirmed"]',
+            'label.icheckbox',
+            '.icheckbox',
+            'div.icheckbox',
+            'input#policy_confirmed',
+            'input[name="policy_confirmed"]',
+        ]:
+            el = page.locator(selector)
+            if await el.count() > 0:
+                await el.first.click()
+                checkbox_clicked = True
+                logger.info("Checked policy checkbox via: %s", selector)
                 await self._random_delay(0.3, 1.0)
-        except Exception:
-            pass
+                break
+
+        if not checkbox_clicked:
+            logger.warning("Could not find policy checkbox — login may fail")
+            await self._save_screenshot("checkbox_not_found")
 
         # Submit
         submit_btn = page.locator('input[type="submit"][name="commit"]')
