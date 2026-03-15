@@ -1,3 +1,6 @@
+# WARNING
+Complete AI generated slop. I'm too sleep deprived and tired to actually read, understand or care about any of this.
+
 # 🇺🇸 US Visa Appointment Scheduler
 
 Automatically monitors the US visa appointment system ([ais.usvisa-info.com](https://ais.usvisa-info.com)) for earlier available dates and sends **Telegram notifications** when a better slot is found. Optionally auto-reschedules.
