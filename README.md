@@ -144,4 +144,4 @@ This tool is for **personal use only**. Use responsibly and respect the terms of
 
 ## License
 
-MIT
+[Unlicense](UNLICENSE) — public domain.
