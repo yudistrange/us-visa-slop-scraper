@@ -20,13 +20,18 @@ async def run() -> None:
     settings = load_settings()
     logger = setup_logging(settings.log_level)
 
+    facility_names = [
+        f"{settings.facility_name(fid)} ({fid})"
+        for fid in settings.facility_id_list
+    ]
+
     logger.info("=" * 60)
     logger.info("US Visa Appointment Scheduler starting up")
     logger.info("=" * 60)
     logger.info("Email:        %s", settings.usvisa_email)
     logger.info("Schedule ID:  %s", settings.schedule_id)
-    logger.info("Facility ID:  %s", settings.facility_id)
     logger.info("Country:      %s", settings.country_code)
+    logger.info("Facilities:   %s", ", ".join(facility_names))
     logger.info("Current date: %s", format_date(settings.current_appointment_date.isoformat()))
     logger.info("Interval:     %d ± %d min", settings.check_interval_minutes, settings.check_interval_jitter_minutes)
     logger.info("Auto-resched: %s", settings.auto_reschedule)
@@ -57,7 +62,7 @@ async def run() -> None:
         try:
             await notifier.notify_startup(
                 current_date=format_date(settings.current_appointment_date.isoformat()),
-                facility_id=settings.facility_id,
+                facility_names=facility_names,
             )
         except Exception as e:
             logger.error("Failed to send startup notification: %s", e)

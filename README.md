@@ -54,7 +54,7 @@ USVISA_PASSWORD=your-password
 SCHEDULE_ID=12345678
 
 # Consulate Configuration
-FACILITY_ID=95          # See facility_ids.md for codes
+FACILITY_IDS=89,94,95   # Comma-separated, see facility_ids.md
 COUNTRY_CODE=en-ca      # Country code in URL (e.g., en-ca, en-in, en-gb)
 
 # Current Appointment Date (YYYY-MM-DD)

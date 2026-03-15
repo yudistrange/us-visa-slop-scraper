@@ -97,15 +97,18 @@ class TelegramNotifier:
         )
         return await self.send_message(text)
 
-    async def notify_startup(self, current_date: str, facility_id: int) -> dict:
-        """Send a startup notification."""
+    async def notify_startup(
+        self, current_date: str, facility_names: list[str]
+    ) -> dict:
+        """Send a startup notification listing all monitored facilities."""
+        facilities_str = "\n".join(f"  • {name}" for name in facility_names)
         text = (
             f"🚀 <b>VISA SCHEDULER STARTED</b>\n"
             f"\n"
             f"📅 Current appointment: <b>{current_date}</b>\n"
-            f"🏢 Facility ID: {facility_id}\n"
+            f"🏢 Monitoring:\n{facilities_str}\n"
             f"\n"
-            f"Monitoring for earlier dates..."
+            f"Checking for earlier dates..."
         )
         return await self.send_message(text)
 
@@ -114,7 +117,7 @@ class TelegramNotifier:
         text = (
             f"ℹ️ <b>No appointment dates available</b>\n"
             f"\n"
-            f"The consulate calendar has no open slots right now.\n"
+            f"No open slots at any monitored consulate right now.\n"
             f"Will keep checking..."
         )
         return await self.send_message(text, disable_notification=True)
