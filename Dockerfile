@@ -1,7 +1,8 @@
 FROM python:3.12-slim
 
-# Install system dependencies for Playwright
+# Install system dependencies for Playwright + system Chromium (ARM compatible)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
@@ -26,8 +27,12 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers
-RUN playwright install chromium
+# Install Playwright — skip browser download, we use system Chromium
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+RUN playwright install-deps chromium 2>/dev/null || true
+
+# Tell Playwright to use the system-installed Chromium
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Copy source
 COPY src/ src/
