@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     check_interval_minutes: int = Field(default=10, ge=1)
     check_interval_jitter_minutes: int = Field(default=5, ge=0)
     auto_reschedule: bool = False
+    reschedule_threshold_days: int = Field(default=0, ge=0)
 
     # --- Advanced ---
     log_level: str = "INFO"

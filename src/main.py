@@ -72,8 +72,12 @@ async def run() -> None:
             logger.info("--- Check cycle at %s ---", check_start.strftime("%Y-%m-%d %H:%M:%S"))
 
             try:
-                await checker.check_and_notify()
+                should_exit = await checker.check_and_notify()
                 consecutive_errors = 0
+
+                if should_exit:
+                    logger.info("🎉 Successfully rescheduled — exiting scheduler")
+                    break
 
             except Exception as e:
                 consecutive_errors += 1

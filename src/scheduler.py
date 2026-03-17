@@ -28,13 +28,15 @@ class AppointmentChecker:
         # Track last notified date per facility to avoid duplicate alerts
         self._last_notified: dict[int, str] = {}
 
-    async def check_and_notify(self) -> None:
+    async def check_and_notify(self) -> bool:
         """
         Main check cycle:
         1. Fetch available dates for ALL configured facilities
         2. Compare each with current appointment
         3. Notify for each facility that has an earlier date
         4. Optionally auto-reschedule to the absolute earliest across all
+
+        Returns True if the scheduler should exit (successful threshold reschedule).
         """
         results = await self.visa_client.get_all_facility_dates()
 
@@ -57,7 +59,7 @@ class AppointmentChecker:
 
         if not earlier:
             logger.info("No earlier dates found across any facility")
-            return
+            return False
 
         # Sort by earliest date (best first)
         earlier.sort(key=lambda r: r.earliest_date)  # type: ignore[arg-type]
@@ -88,17 +90,36 @@ class AppointmentChecker:
                 current_date=format_date(current_str),
                 days_earlier=days_diff,
                 facility_name=r.facility_name,
-                auto_rescheduled=False,  # Updated below if auto-reschedule succeeds
+                auto_rescheduled=False,
             )
             self._last_notified[r.facility_id] = r.earliest_date  # type: ignore[assignment]
 
         # Auto-reschedule to the absolute best option
         if self.settings.auto_reschedule:
             best = earlier[0]
-            await self._try_reschedule(best)
+            best_dt = datetime.strptime(best.earliest_date, "%Y-%m-%d").date()  # type: ignore[arg-type]
+            best_days_diff = (current_date - best_dt).days
+            threshold = self.settings.reschedule_threshold_days
 
-    async def _try_reschedule(self, result: FacilityResult) -> None:
-        """Attempt to reschedule to the earliest date at the given facility."""
+            if threshold > 0 and best_days_diff < threshold:
+                logger.info(
+                    "Best date is %d days earlier, below threshold of %d days — skipping reschedule",
+                    best_days_diff,
+                    threshold,
+                )
+                return False
+
+            should_exit = await self._try_reschedule(best)
+            return should_exit
+
+        return False
+
+    async def _try_reschedule(self, result: FacilityResult) -> bool:
+        """
+        Attempt to reschedule to the earliest date at the given facility.
+
+        Returns True if reschedule succeeded (caller should exit).
+        """
         assert result.earliest_date is not None
 
         try:
@@ -112,7 +133,7 @@ class AppointmentChecker:
                     result.facility_name,
                     result.earliest_date,
                 )
-                return
+                return False
 
             chosen_time = times[0]
             logger.info(
@@ -140,11 +161,14 @@ class AppointmentChecker:
 
                 self.settings.current_appointment_date = earliest_dt
                 logger.info("Updated current appointment date to %s", result.earliest_date)
+                return True
             else:
                 logger.warning("❌ Auto-reschedule to %s failed", result.facility_name)
+                return False
 
         except Exception as e:
             logger.error("Reschedule error for %s: %s", result.facility_name, e, exc_info=True)
+            return False
 
     def _log_summary(self, results: list[FacilityResult], current_str: str) -> None:
         """Log a one-line-per-facility summary."""
