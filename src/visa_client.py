@@ -58,14 +58,8 @@ class VisaClient:
 
         self._playwright = await async_playwright().start()
 
-        # Use system Chromium if PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH is set (ARM/Docker)
-        executable_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH")
-        if executable_path:
-            logger.info("Using system Chromium: %s", executable_path)
-
         self._browser = await self._playwright.chromium.launch(
             headless=self.settings.headless,
-            executable_path=executable_path,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
