@@ -11,7 +11,12 @@ from datetime import datetime
 from .config import load_settings
 from .scheduler import AppointmentChecker
 from .telegram_notifier import TelegramNotifier
-from .utils import format_date, setup_logging
+from .utils import (
+    bytes_to_mib,
+    format_date,
+    get_cgroup_memory_stats,
+    setup_logging,
+)
 from .visa_client import VisaClient
 
 
@@ -125,6 +130,16 @@ async def run() -> None:
                         logger.warning("Browser cleanup was incomplete: %s", close_error)
                     await visa_client.start()
                     browser_started_at = asyncio.get_running_loop().time()
+
+            memory = get_cgroup_memory_stats()
+            if memory:
+                logger.info(
+                    "Memory: %.1f MiB total (anon %.1f, file %.1f, shmem %.1f)",
+                    bytes_to_mib(memory["current"]),
+                    bytes_to_mib(memory["anon"]),
+                    bytes_to_mib(memory["file"]),
+                    bytes_to_mib(memory["shmem"]),
+                )
 
             # Calculate next check time with jitter
             base_interval = settings.check_interval_minutes * 60

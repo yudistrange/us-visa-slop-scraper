@@ -8,6 +8,35 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+CGROUP_V2_DIR = Path("/sys/fs/cgroup")
+
+
+def get_cgroup_memory_stats(cgroup_dir: Path = CGROUP_V2_DIR) -> dict[str, int] | None:
+    """Return cgroup v2 memory counters in bytes when available."""
+    try:
+        current = int((cgroup_dir / "memory.current").read_text().strip())
+        stat = {
+            key: int(value)
+            for key, value in (
+                line.split(maxsplit=1)
+                for line in (cgroup_dir / "memory.stat").read_text().splitlines()
+            )
+        }
+    except (OSError, ValueError):
+        return None
+
+    return {
+        "current": current,
+        "anon": stat.get("anon", 0),
+        "file": stat.get("file", 0),
+        "shmem": stat.get("shmem", 0),
+    }
+
+
+def bytes_to_mib(value: int) -> float:
+    """Convert bytes to mebibytes."""
+    return value / (1024 * 1024)
+
 
 def setup_logging(level: str = "INFO") -> logging.Logger:
     """Configure application-wide logging with console + rotating file output."""
