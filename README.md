@@ -86,6 +86,10 @@ python -m src.main
 docker-compose up -d
 ```
 
+The production Docker image installs only Chromium's headless shell to save
+disk space. Use the local installation above when debugging with
+`HEADLESS=false`.
+
 ## Setup Telegram Bot
 
 1. Open Telegram and search for **@BotFather**
