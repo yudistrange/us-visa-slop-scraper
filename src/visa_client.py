@@ -217,28 +217,55 @@ class VisaClient:
         await password_input.type(self.settings.usvisa_password, delay=random.randint(50, 150))
         await self._random_delay(0.5, 1.5)
 
-        # Check the privacy/terms checkbox below the password field
-        # The actual <input> may be hidden; click the visible <label> or wrapper instead
-        checkbox_clicked = False
-        for selector in [
-            'label[for="policy_confirmed"]',
-            'label.icheckbox',
-            '.icheckbox',
-            'div.icheckbox',
-            'input#policy_confirmed',
-            'input[name="policy_confirmed"]',
-        ]:
-            el = page.locator(selector)
-            if await el.count() > 0:
-                await el.first.click()
-                checkbox_clicked = True
-                logger.info("Checked policy checkbox via: %s", selector)
-                await self._random_delay(0.3, 1.0)
-                break
+        # The site's styled checkbox hides the native input. A successful click
+        # on its label/wrapper does not necessarily mean that the input changed,
+        # so verify the native state before submitting the form.
+        checkbox = page.locator(
+            'input#policy_confirmed, input[name="policy_confirmed"]'
+        ).first
+        checkbox_checked = False
 
-        if not checkbox_clicked:
-            logger.warning("Could not find policy checkbox — login may fail")
-            await self._save_screenshot("checkbox_not_found")
+        if await checkbox.count() > 0:
+            checkbox_checked = await checkbox.is_checked()
+
+            if not checkbox_checked:
+                for selector in [
+                    'label[for="policy_confirmed"]',
+                    'label.icheckbox',
+                    '.icheckbox',
+                    'div.icheckbox',
+                ]:
+                    el = page.locator(selector)
+                    if await el.count() == 0:
+                        continue
+                    try:
+                        await el.first.click()
+                    except PlaywrightError:
+                        continue
+                    checkbox_checked = await checkbox.is_checked()
+                    if checkbox_checked:
+                        logger.info("Checked policy checkbox via: %s", selector)
+                        break
+
+            if not checkbox_checked:
+                try:
+                    # check() is idempotent, unlike click(), and force=True
+                    # supports the hidden native input used by the site.
+                    await checkbox.check(force=True)
+                    checkbox_checked = await checkbox.is_checked()
+                    if checkbox_checked:
+                        logger.info("Checked policy checkbox via native input")
+                except PlaywrightError:
+                    pass
+
+        if not checkbox_checked:
+            await self._save_screenshot("checkbox_not_checked")
+            raise LoginError(
+                "Login failed: policy checkbox could not be checked. "
+                "Screenshot saved to logs/screenshots/checkbox_not_checked.png"
+            )
+
+        await self._random_delay(0.3, 1.0)
 
         # Submit
         logger.info("Submitting login form...")
