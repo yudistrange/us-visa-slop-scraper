@@ -18,6 +18,18 @@ logger = logging.getLogger("visa_scheduler.client")
 
 SCREENSHOTS_DIR = Path("logs/screenshots")
 
+
+class BrowserSessionError(RuntimeError):
+    """Base class for errors that require re-establishing the browser session."""
+
+
+class LoginError(BrowserSessionError):
+    """Sign-in failed; the browser session must be restarted."""
+
+
+class SessionExpiredError(BrowserSessionError):
+    """An authenticated request was rejected (401/403); the session is stale."""
+
 # Realistic user agents
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -220,8 +232,8 @@ class VisaClient:
             error = page.locator(".flash-container .alert, .error-message")
             if await error.count() > 0:
                 error_text = await error.first.inner_text()
-                raise RuntimeError(f"Login failed: {error_text.strip()}")
-            raise RuntimeError(
+                raise LoginError(f"Login failed: {error_text.strip()}")
+            raise LoginError(
                 "Login failed: still on sign-in page. "
                 "Screenshot saved to logs/screenshots/login_failed.png"
             )
@@ -259,7 +271,7 @@ class VisaClient:
             error_status = response["error"]
             if error_status in (401, 403):
                 self._signed_in = False
-                raise RuntimeError(f"Session expired (HTTP {error_status})")
+                raise SessionExpiredError(f"Session expired (HTTP {error_status})")
             raise RuntimeError(f"API error: HTTP {error_status}")
 
         return response
@@ -321,6 +333,12 @@ class VisaClient:
                     dates=dates,
                     earliest_date=dates[0] if dates else None,
                 )
+            except BrowserSessionError:
+                # Auth/session failures are not per-facility problems — the whole
+                # browser session is dead. Propagate so the caller can restart
+                # instead of masking it as a facility result (which would reset
+                # the error counter and skip the restart path).
+                raise
             except Exception as e:
                 logger.error("Error checking %s: %s", facility_name, e)
                 result = FacilityResult(
