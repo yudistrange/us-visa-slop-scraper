@@ -52,6 +52,8 @@ class VisaClient:
 
     async def start(self) -> None:
         """Launch browser and create a context."""
+        if any((self._playwright, self._browser, self._context, self._page)):
+            raise RuntimeError("Browser is already started; call close() before start()")
         import os
 
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
