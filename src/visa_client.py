@@ -9,7 +9,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+from playwright.async_api import (
+    Browser,
+    BrowserContext,
+    Error as PlaywrightError,
+    Page,
+    async_playwright,
+)
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from .config import Settings
@@ -247,34 +253,51 @@ class VisaClient:
             await self.sign_in()
 
     async def _fetch_json(self, url: str) -> dict | list:
-        """Fetch JSON via the browser session (preserves cookies)."""
-        page = self._page
-        assert page is not None
+        """Fetch JSON through the context request client, which shares cookies."""
+        context = self._context
+        assert context is not None, "Browser not started. Call start() first."
 
-        response = await page.evaluate(
-            """async (url) => {
-                const resp = await fetch(url, {
-                    headers: {
-                        'Accept': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                });
-                if (!resp.ok) {
-                    return { error: resp.status, text: await resp.text() };
-                }
-                return await resp.json();
-            }""",
-            url,
-        )
+        try:
+            response = await context.request.get(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            )
+        except PlaywrightError as exc:
+            self._signed_in = False
+            raise BrowserSessionError(f"Browser request failed: {exc}") from exc
 
-        if isinstance(response, dict) and "error" in response:
-            error_status = response["error"]
-            if error_status in (401, 403):
+        try:
+            if response.status in (401, 403) or "sign_in" in response.url:
                 self._signed_in = False
-                raise SessionExpiredError(f"Session expired (HTTP {error_status})")
-            raise RuntimeError(f"API error: HTTP {error_status}")
+                raise SessionExpiredError(
+                    f"Session expired (HTTP {response.status})"
+                )
 
-        return response
+            if not response.ok:
+                error_text = (await response.text())[:200]
+                raise RuntimeError(
+                    f"API error: HTTP {response.status} — {error_text}"
+                )
+
+            try:
+                result = await response.json()
+            except (ValueError, PlaywrightError) as exc:
+                content_type = response.headers.get("content-type", "")
+                if "text/html" in content_type:
+                    self._signed_in = False
+                    raise SessionExpiredError(
+                        "Session expired: API returned HTML instead of JSON"
+                    ) from exc
+                raise RuntimeError("API returned invalid JSON") from exc
+
+            return result
+        finally:
+            # APIRequestContext retains response bodies until they are disposed
+            # or the entire context closes. Dispose eagerly in this polling loop.
+            await response.dispose()
 
     @retry(
         stop=stop_after_attempt(2),
