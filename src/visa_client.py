@@ -51,40 +51,56 @@ class VisaClient:
         self._signed_in = False
 
     async def start(self) -> None:
-        """Launch browser and create a context."""
+        """Launch browser and create a context.
+
+        The "already started" guard relies on close() clearing every handle even
+        when a close step fails, and on this method leaving no handles behind if
+        it raises partway through. If either invariant breaks, a later start()
+        would wedge on this guard forever.
+        """
         if any((self._playwright, self._browser, self._context, self._page)):
             raise RuntimeError("Browser is already started; call close() before start()")
-        import os
 
         SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        self._playwright = await async_playwright().start()
+        try:
+            self._playwright = await async_playwright().start()
 
-        self._browser = await self._playwright.chromium.launch(
-            headless=self.settings.headless,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-            ],
-        )
+            self._browser = await self._playwright.chromium.launch(
+                headless=self.settings.headless,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                ],
+            )
 
-        user_agent = random.choice(USER_AGENTS)
-        self._context = await self._browser.new_context(
-            user_agent=user_agent,
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US",
-            timezone_id="America/New_York",
-        )
+            user_agent = random.choice(USER_AGENTS)
+            self._context = await self._browser.new_context(
+                user_agent=user_agent,
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                timezone_id="America/New_York",
+            )
 
-        # Mask webdriver detection
-        await self._context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        """)
+            # Mask webdriver detection
+            await self._context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            """)
 
-        self._page = await self._context.new_page()
+            self._page = await self._context.new_page()
+        except Exception:
+            # Release any partially-created resources so we don't leak a live
+            # browser/driver and so the guard above stays satisfiable. Never let
+            # a cleanup failure mask the original launch error.
+            try:
+                await self.close()
+            except Exception as cleanup_error:
+                logger.warning("Cleanup after failed start was incomplete: %s", cleanup_error)
+            raise
+
         logger.info("Browser started (headless=%s, UA=%s)", self.settings.headless, user_agent[:50])
 
     async def close(self) -> None:
