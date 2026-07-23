@@ -149,6 +149,9 @@ When running on cgroup v2, each check logs total, anonymous, file-cache, and
 shared-memory usage. This helps distinguish process memory growth from
 reclaimable filesystem cache.
 
+Docker console logs are capped at three 5 MiB files. Application log files in
+`./logs` retain their existing rotation limits.
+
 ## ⚠️ Disclaimer
 
 This tool is for **personal use only**. Use responsibly and respect the terms of service of ais.usvisa-info.com. The authors are not responsible for any consequences of using this tool, including but not limited to account suspension.
