@@ -100,8 +100,8 @@ async def run() -> None:
                     logger.info("Restarting browser session...")
                     try:
                         await visa_client.close()
-                    except Exception:
-                        pass
+                    except Exception as close_error:
+                        logger.warning("Browser cleanup was incomplete: %s", close_error)
                     await visa_client.start()
 
             # Calculate next check time with jitter
@@ -134,8 +134,12 @@ async def run() -> None:
 
     finally:
         logger.info("Shutting down...")
-        await visa_client.close()
-        await notifier.close()
+        try:
+            await visa_client.close()
+        except Exception as close_error:
+            logger.warning("Browser cleanup was incomplete: %s", close_error)
+        finally:
+            await notifier.close()
         logger.info("Goodbye!")
 
 

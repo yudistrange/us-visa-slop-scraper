@@ -86,14 +86,37 @@ class VisaClient:
         logger.info("Browser started (headless=%s, UA=%s)", self.settings.headless, user_agent[:50])
 
     async def close(self) -> None:
-        """Clean up browser resources."""
-        if self._context:
-            await self._context.close()
-        if self._browser:
-            await self._browser.close()
-        if self._playwright:
-            await self._playwright.stop()
+        """Clean up all browser resources, even if one cleanup step fails."""
+        context = self._context
+        browser = self._browser
+        playwright = self._playwright
+
+        # Clear references before awaiting cleanup so a failed close cannot leave
+        # stale handles that are later overwritten by start().
+        self._page = None
+        self._context = None
+        self._browser = None
+        self._playwright = None
         self._signed_in = False
+
+        errors: list[tuple[str, Exception]] = []
+        for resource_name, resource, close_method in [
+            ("browser context", context, "close"),
+            ("browser", browser, "close"),
+            ("Playwright", playwright, "stop"),
+        ]:
+            if resource is None:
+                continue
+            try:
+                await getattr(resource, close_method)()
+            except Exception as exc:
+                errors.append((resource_name, exc))
+                logger.warning("Failed to close %s: %s", resource_name, exc)
+
+        if errors:
+            failed_resources = ", ".join(name for name, _ in errors)
+            raise RuntimeError(f"Failed to close: {failed_resources}") from errors[0][1]
+
         logger.info("Browser closed")
 
     async def _random_delay(self, min_sec: float = 1.0, max_sec: float = 3.0) -> None:
