@@ -91,10 +91,12 @@ class VisaClient:
             """)
 
             self._page = await self._context.new_page()
-        except Exception:
+        except BaseException:
             # Release any partially-created resources so we don't leak a live
-            # browser/driver and so the guard above stays satisfiable. Never let
-            # a cleanup failure mask the original launch error.
+            # browser/driver and so the guard above stays satisfiable. Catch
+            # BaseException (not just Exception) so a CancelledError raised
+            # mid-startup still triggers cleanup. Never let a cleanup failure
+            # mask the original launch error.
             try:
                 await self.close()
             except Exception as cleanup_error:
