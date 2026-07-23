@@ -68,9 +68,12 @@ async def run() -> None:
     logger.info("Auto-resched: %s", settings.auto_reschedule)
     logger.info("Headless:     %s", settings.headless)
     logger.info(
-        "Browser cycle: %s",
+        "Browser cycle: %s; anonymous-memory threshold: %s",
         f"{settings.browser_recycle_hours} hours"
         if settings.browser_recycle_hours
+        else "disabled",
+        f"{settings.browser_recycle_memory_mib} MiB"
+        if settings.browser_recycle_memory_mib
         else "disabled",
     )
     logger.info("=" * 60)
@@ -184,6 +187,23 @@ async def run() -> None:
                     bytes_to_mib(memory["file"]),
                     bytes_to_mib(memory["shmem"]),
                 )
+
+                memory_threshold = settings.browser_recycle_memory_mib
+                if (
+                    memory_threshold
+                    and bytes_to_mib(memory["anon"]) >= memory_threshold
+                ):
+                    logger.warning(
+                        "Anonymous memory reached %.1f MiB; releasing browser session",
+                        bytes_to_mib(memory["anon"]),
+                    )
+                    try:
+                        await visa_client.close()
+                    except Exception as close_error:
+                        logger.warning(
+                            "Browser cleanup was incomplete: %s", close_error
+                        )
+                    browser_started_at = None
 
             # Calculate next check time with jitter
             base_interval = settings.check_interval_minutes * 60

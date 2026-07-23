@@ -72,7 +72,8 @@ TELEGRAM_CHAT_ID=123456789
 CHECK_INTERVAL_MINUTES=10       # How often to check (default: 10)
 CHECK_INTERVAL_JITTER_MINUTES=5 # Random jitter added (default: 5)
 AUTO_RESCHEDULE=false           # Auto-book earlier date (default: false)
-BROWSER_RECYCLE_HOURS=24        # Recreate Chromium periodically (0 disables)
+BROWSER_RECYCLE_HOURS=6         # Recreate Chromium periodically (0 disables)
+BROWSER_RECYCLE_MEMORY_MIB=400  # Recycle at this anonymous-memory usage
 ```
 
 ### 3. Run
