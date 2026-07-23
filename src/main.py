@@ -18,7 +18,7 @@ from .utils import (
     get_cgroup_memory_stats,
     setup_logging,
 )
-from .visa_client import VisaClient
+from .visa_client import BrowserSessionError, VisaClient
 
 logger = logging.getLogger("visa_scheduler.main")
 
@@ -92,9 +92,11 @@ async def run() -> None:
     consecutive_errors = 0
 
     try:
-        # Start browser
+        # Start browser. browser_started_at doubles as a health signal: None
+        # means there is no live browser and the loop must (re)start one before
+        # doing any work.
         await visa_client.start()
-        browser_started_at = asyncio.get_running_loop().time()
+        browser_started_at: float | None = asyncio.get_running_loop().time()
 
         # Send startup notification
         try:
@@ -106,6 +108,20 @@ async def run() -> None:
             logger.error("Failed to send startup notification: %s", e)
 
         while not shutdown_event.is_set():
+            # Recovery point: if a previous restart failed, browser_started_at is
+            # None and there is no live browser. Re-establish it before anything
+            # else; if that fails again, back off briefly and retry next cycle.
+            if browser_started_at is None:
+                logger.info("No live browser session; attempting to start one...")
+                browser_started_at = await _restart_browser(visa_client)
+                if browser_started_at is None:
+                    logger.warning("Browser start failed; retrying shortly")
+                    try:
+                        await asyncio.wait_for(shutdown_event.wait(), timeout=60)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
+
             recycle_seconds = settings.browser_recycle_hours * 60 * 60
             browser_age = asyncio.get_running_loop().time() - browser_started_at
             if recycle_seconds and browser_age >= recycle_seconds:
@@ -114,16 +130,12 @@ async def run() -> None:
                     browser_age / 3600,
                 )
                 # A recycle is routine maintenance — a transient launch failure
-                # must not crash the daemon. Retry on the next cycle instead.
-                restarted_at = await _restart_browser(visa_client)
-                if restarted_at is None:
+                # must not crash the daemon. Mark the browser unavailable and let
+                # the recovery point above retry on the next cycle.
+                browser_started_at = await _restart_browser(visa_client)
+                if browser_started_at is None:
                     logger.warning("Browser recycle failed; will retry next cycle")
-                    try:
-                        await asyncio.wait_for(shutdown_event.wait(), timeout=60)
-                    except asyncio.TimeoutError:
-                        pass
                     continue
-                browser_started_at = restarted_at
 
             check_start = datetime.now()
             logger.info("--- Check cycle at %s ---", check_start.strftime("%Y-%m-%d %H:%M:%S"))
@@ -152,16 +164,16 @@ async def run() -> None:
                     except Exception:
                         logger.error("Failed to send error notification")
 
-                # Re-create browser session on auth errors
-                if "session expired" in str(e).lower() or "login failed" in str(e).lower():
+                # Re-create browser session on auth / session-lifecycle errors.
+                # On failure, leave browser_started_at as None so the recovery
+                # point at the top of the loop retries before the next check.
+                if isinstance(e, BrowserSessionError):
                     logger.info("Restarting browser session...")
-                    restarted_at = await _restart_browser(visa_client)
-                    if restarted_at is None:
+                    browser_started_at = await _restart_browser(visa_client)
+                    if browser_started_at is None:
                         logger.warning(
                             "Browser restart failed; will retry on the next cycle"
                         )
-                    else:
-                        browser_started_at = restarted_at
 
             memory = get_cgroup_memory_stats()
             if memory:
