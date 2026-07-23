@@ -35,6 +35,7 @@ services:
     #   - LOG_LEVEL=INFO
     #   - MAX_CONSECUTIVE_ERRORS=5
     #   - HEADLESS=true
+    #   - BROWSER_RECYCLE_HOURS=24
 
     deploy:
       resources:

@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     max_consecutive_errors: int = 5
     headless: bool = True
+    browser_recycle_hours: int = Field(default=24, ge=0)
 
     # --- Parsed facility list ---
     @property

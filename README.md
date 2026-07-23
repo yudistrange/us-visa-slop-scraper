@@ -15,6 +15,7 @@ Automatically monitors the US visa appointment system ([ais.usvisa-info.com](htt
 - 🛡️ **Anti-detection** — randomized delays, realistic headers, session management
 - 🐳 **Docker support** for easy deployment
 - 📊 **Logging** with rotation for long-running monitoring
+- ♻️ **Browser recycling** to bound Chromium memory retention
 
 ## Prerequisites
 
@@ -71,6 +72,7 @@ TELEGRAM_CHAT_ID=123456789
 CHECK_INTERVAL_MINUTES=10       # How often to check (default: 10)
 CHECK_INTERVAL_JITTER_MINUTES=5 # Random jitter added (default: 5)
 AUTO_RESCHEDULE=false           # Auto-book earlier date (default: false)
+BROWSER_RECYCLE_HOURS=24        # Recreate Chromium periodically (0 disables)
 ```
 
 ### 3. Run

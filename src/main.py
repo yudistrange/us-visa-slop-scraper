@@ -36,6 +36,12 @@ async def run() -> None:
     logger.info("Interval:     %d ± %d min", settings.check_interval_minutes, settings.check_interval_jitter_minutes)
     logger.info("Auto-resched: %s", settings.auto_reschedule)
     logger.info("Headless:     %s", settings.headless)
+    logger.info(
+        "Browser cycle: %s",
+        f"{settings.browser_recycle_hours} hours"
+        if settings.browser_recycle_hours
+        else "disabled",
+    )
     logger.info("=" * 60)
 
     notifier = TelegramNotifier(settings.telegram_bot_token, settings.telegram_chat_id)
@@ -57,6 +63,7 @@ async def run() -> None:
     try:
         # Start browser
         await visa_client.start()
+        browser_started_at = asyncio.get_running_loop().time()
 
         # Send startup notification
         try:
@@ -68,6 +75,20 @@ async def run() -> None:
             logger.error("Failed to send startup notification: %s", e)
 
         while not shutdown_event.is_set():
+            recycle_seconds = settings.browser_recycle_hours * 60 * 60
+            browser_age = asyncio.get_running_loop().time() - browser_started_at
+            if recycle_seconds and browser_age >= recycle_seconds:
+                logger.info(
+                    "Recycling browser after %.1f hours to release retained memory",
+                    browser_age / 3600,
+                )
+                try:
+                    await visa_client.close()
+                except Exception as close_error:
+                    logger.warning("Browser cleanup was incomplete: %s", close_error)
+                await visa_client.start()
+                browser_started_at = asyncio.get_running_loop().time()
+
             check_start = datetime.now()
             logger.info("--- Check cycle at %s ---", check_start.strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -103,6 +124,7 @@ async def run() -> None:
                     except Exception as close_error:
                         logger.warning("Browser cleanup was incomplete: %s", close_error)
                     await visa_client.start()
+                    browser_started_at = asyncio.get_running_loop().time()
 
             # Calculate next check time with jitter
             base_interval = settings.check_interval_minutes * 60
