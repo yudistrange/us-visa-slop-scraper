@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from html.parser import HTMLParser
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,23 @@ from .config import Settings
 logger = logging.getLogger("visa_scheduler.client")
 
 SCREENSHOTS_DIR = Path("logs/screenshots")
+
+
+class CsrfTokenParser(HTMLParser):
+    """Extract Rails' CSRF token without keeping a renderer page alive."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.token: str | None = None
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        if tag != "meta":
+            return
+        attributes = dict(attrs)
+        if attributes.get("name") == "csrf-token":
+            self.token = attributes.get("content")
 
 
 class BrowserSessionError(RuntimeError):
@@ -247,10 +265,39 @@ class VisaClient:
         self._signed_in = True
         logger.info("✅ Successfully signed in (URL: %s)", page.url)
 
+        # APIRequestContext shares this context's cookie jar, so the renderer is
+        # no longer needed after authentication. Recreate a page only when a new
+        # login is required.
+        self._page = None
+        try:
+            await page.close()
+        except PlaywrightError as exc:
+            self._signed_in = False
+            raise BrowserSessionError(f"Failed to release login page: {exc}") from exc
+        logger.info("Login page closed; continuing with the context request client")
+
     async def _ensure_signed_in(self) -> None:
-        """Ensure we have an active session, re-login if needed."""
-        if not self._signed_in:
+        """Ensure we have an active session, creating a login page on demand."""
+        if self._signed_in:
+            return
+
+        context = self._context
+        if context is None:
+            raise BrowserSessionError("Browser context is not available")
+
+        if self._page is None:
+            try:
+                self._page = await context.new_page()
+            except PlaywrightError as exc:
+                raise BrowserSessionError(f"Failed to create login page: {exc}") from exc
+
+        try:
             await self.sign_in()
+        except BrowserSessionError:
+            raise
+        except Exception as exc:
+            self._signed_in = False
+            raise LoginError(f"Login failed: {exc}") from exc
 
     async def _fetch_json(self, url: str) -> dict | list:
         """Fetch JSON through the context request client, which shares cookies."""
@@ -415,8 +462,8 @@ class VisaClient:
         Returns True if successful.
         """
         await self._ensure_signed_in()
-        page = self._page
-        assert page is not None
+        context = self._context
+        assert context is not None
 
         facility_name = self.settings.facility_name(facility_id)
         logger.info(
@@ -426,60 +473,69 @@ class VisaClient:
             appointment_time,
         )
 
-        # Navigate to the reschedule page
-        await page.goto(self.settings.reschedule_url, wait_until="domcontentloaded")
+        # Fetch the reschedule form without creating a renderer page.
         await self._random_delay(2, 4)
-
-        # Get the CSRF token
-        csrf_token = await page.evaluate(
-            """() => {
-                const meta = document.querySelector('meta[name="csrf-token"]');
-                return meta ? meta.getAttribute('content') : null;
-            }"""
+        form_response = await context.request.get(
+            self.settings.reschedule_url,
+            headers={"Accept": "text/html"},
         )
+        try:
+            if form_response.status in (401, 403) or "sign_in" in form_response.url:
+                self._signed_in = False
+                raise SessionExpiredError(
+                    f"Session expired (HTTP {form_response.status})"
+                )
+            if not form_response.ok:
+                raise RuntimeError(
+                    f"Could not load reschedule form: HTTP {form_response.status}"
+                )
+
+            parser = CsrfTokenParser()
+            parser.feed(await form_response.text())
+            csrf_token = parser.token
+        finally:
+            await form_response.dispose()
 
         if not csrf_token:
             raise RuntimeError("Could not find CSRF token for reschedule")
 
-        # Submit reschedule via API
-        response = await page.evaluate(
-            """async ({url, date, time, facilityId, csrfToken}) => {
-                const formData = new URLSearchParams();
-                formData.append('utf8', '✓');
-                formData.append('authenticity_token', csrfToken);
-                formData.append('appointments[consulate_appointment][facility_id]', facilityId);
-                formData.append('appointments[consulate_appointment][date]', date);
-                formData.append('appointments[consulate_appointment][time]', time);
-                formData.append('confirmed', 'true');
-
-                const resp = await fetch(url, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'X-CSRF-Token': csrfToken,
-                    },
-                    body: formData.toString(),
-                });
-
-                return { status: resp.status, ok: resp.ok, text: await resp.text() };
-            }""",
-            {
-                "url": self.settings.reschedule_url,
-                "date": appointment_date,
-                "time": appointment_time,
-                "facilityId": str(facility_id),
-                "csrfToken": csrf_token,
+        # Submit reschedule through the cookie-sharing request context.
+        response = await context.request.put(
+            self.settings.reschedule_url,
+            headers={
+                "X-Requested-With": "XMLHttpRequest",
+                "X-CSRF-Token": csrf_token,
+            },
+            form={
+                "utf8": "✓",
+                "authenticity_token": csrf_token,
+                "appointments[consulate_appointment][facility_id]": str(facility_id),
+                "appointments[consulate_appointment][date]": appointment_date,
+                "appointments[consulate_appointment][time]": appointment_time,
+                "confirmed": "true",
             },
         )
+        try:
+            response_text = await response.text()
+            if response.status in (401, 403) or "sign_in" in response.url:
+                self._signed_in = False
+                raise SessionExpiredError(
+                    f"Session expired (HTTP {response.status})"
+                )
+            if response.ok:
+                logger.info(
+                    "✅ Successfully rescheduled to %s on %s at %s!",
+                    facility_name,
+                    appointment_date,
+                    appointment_time,
+                )
+                return True
 
-        if response.get("ok"):
-            logger.info("✅ Successfully rescheduled to %s on %s at %s!", facility_name, appointment_date, appointment_time)
-            return True
-        else:
             logger.error(
                 "Reschedule failed: HTTP %s — %s",
-                response.get("status"),
-                response.get("text", "")[:300],
+                response.status,
+                response_text[:300],
             )
             return False
+        finally:
+            await response.dispose()
