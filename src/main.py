@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import signal
 import sys
@@ -18,6 +19,31 @@ from .utils import (
     setup_logging,
 )
 from .visa_client import VisaClient
+
+logger = logging.getLogger("visa_scheduler.main")
+
+
+async def _restart_browser(visa_client: VisaClient) -> float | None:
+    """Close and relaunch the browser, tolerating failures at either step.
+
+    Returns the loop timestamp of the fresh browser, or None if the relaunch
+    failed. On failure the client is left fully closed, so the caller can safely
+    retry a start() later without tripping the "already started" guard.
+    """
+    try:
+        await visa_client.close()
+    except Exception as close_error:
+        logger.warning("Browser cleanup was incomplete: %s", close_error)
+
+    try:
+        await visa_client.start()
+    except Exception as start_error:
+        # start() cleans up its own partial state on failure, so the client is
+        # left closed and a later restart can safely try again.
+        logger.error("Failed to relaunch browser: %s", start_error, exc_info=True)
+        return None
+
+    return asyncio.get_running_loop().time()
 
 
 async def run() -> None:
@@ -87,12 +113,17 @@ async def run() -> None:
                     "Recycling browser after %.1f hours to release retained memory",
                     browser_age / 3600,
                 )
-                try:
-                    await visa_client.close()
-                except Exception as close_error:
-                    logger.warning("Browser cleanup was incomplete: %s", close_error)
-                await visa_client.start()
-                browser_started_at = asyncio.get_running_loop().time()
+                # A recycle is routine maintenance — a transient launch failure
+                # must not crash the daemon. Retry on the next cycle instead.
+                restarted_at = await _restart_browser(visa_client)
+                if restarted_at is None:
+                    logger.warning("Browser recycle failed; will retry next cycle")
+                    try:
+                        await asyncio.wait_for(shutdown_event.wait(), timeout=60)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
+                browser_started_at = restarted_at
 
             check_start = datetime.now()
             logger.info("--- Check cycle at %s ---", check_start.strftime("%Y-%m-%d %H:%M:%S"))
@@ -124,12 +155,13 @@ async def run() -> None:
                 # Re-create browser session on auth errors
                 if "session expired" in str(e).lower() or "login failed" in str(e).lower():
                     logger.info("Restarting browser session...")
-                    try:
-                        await visa_client.close()
-                    except Exception as close_error:
-                        logger.warning("Browser cleanup was incomplete: %s", close_error)
-                    await visa_client.start()
-                    browser_started_at = asyncio.get_running_loop().time()
+                    restarted_at = await _restart_browser(visa_client)
+                    if restarted_at is None:
+                        logger.warning(
+                            "Browser restart failed; will retry on the next cycle"
+                        )
+                    else:
+                        browser_started_at = restarted_at
 
             memory = get_cgroup_memory_stats()
             if memory:
