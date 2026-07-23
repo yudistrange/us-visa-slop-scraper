@@ -152,6 +152,10 @@ reclaimable filesystem cache.
 Docker console logs are capped at three 5 MiB files. Application log files in
 `./logs` retain their existing rotation limits.
 
+The Compose service is limited to 640 MiB of memory, half a CPU, and 128
+processes. Increase these values if Chromium cannot complete login reliably on
+your VM.
+
 ## ⚠️ Disclaimer
 
 This tool is for **personal use only**. Use responsibly and respect the terms of service of ais.usvisa-info.com. The authors are not responsible for any consequences of using this tool, including but not limited to account suspension.

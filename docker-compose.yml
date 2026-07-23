@@ -3,6 +3,9 @@ services:
     build: .
     container_name: visa-scheduler
     restart: unless-stopped
+    mem_limit: 640m
+    cpus: 0.5
+    pids_limit: 128
     logging:
       driver: json-file
       options:
@@ -46,5 +49,6 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: "1.0"
+          memory: 640M
+          cpus: "0.5"
+          pids: 128
