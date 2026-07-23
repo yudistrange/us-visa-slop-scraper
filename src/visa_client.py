@@ -15,7 +15,6 @@ from playwright.async_api import (
     BrowserContext,
     Error as PlaywrightError,
     Page,
-    Route,
     async_playwright,
 )
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -25,16 +24,6 @@ from .config import Settings
 logger = logging.getLogger("visa_scheduler.client")
 
 SCREENSHOTS_DIR = Path("logs/screenshots")
-
-BLOCKED_RESOURCE_TYPES = {"font", "image", "media"}
-
-
-async def block_heavy_resources(route: Route) -> None:
-    """Skip assets that are unnecessary for the login form."""
-    if route.request.resource_type in BLOCKED_RESOURCE_TYPES:
-        await route.abort()
-    else:
-        await route.continue_()
 
 
 class CsrfTokenParser(HTMLParser):
@@ -125,13 +114,10 @@ class VisaClient:
             user_agent = random.choice(USER_AGENTS)
             self._context = await self._browser.new_context(
                 user_agent=user_agent,
-                viewport={"width": 1280, "height": 720},
+                viewport={"width": 1920, "height": 1080},
                 locale="en-US",
                 timezone_id="America/New_York",
-                service_workers="block",
             )
-
-            await self._context.route("**/*", block_heavy_resources)
 
             # Mask webdriver detection
             await self._context.add_init_script("""
